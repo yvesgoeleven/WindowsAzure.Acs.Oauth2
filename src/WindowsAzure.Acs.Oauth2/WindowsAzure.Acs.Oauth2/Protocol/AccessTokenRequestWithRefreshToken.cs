@@ -3,12 +3,31 @@ using System;
 namespace WindowsAzure.Acs.Oauth2.Protocol
 {
     [Serializable]
-    public class AccessTokenRequestWithAuthorizationCode
+    public class AccessTokenRequestWithRefreshToken
         : AccessTokenRequest
     {
+        public string RefreshToken
+        {
+            get
+            {
+                return base.Parameters["refresh_token"];
+            }
+            set
+            {
+                if (string.IsNullOrEmpty(value))
+                {
+                    throw new ArgumentNullException("value");
+                }
+                base.Parameters["refresh_token"] = value;
+            }
+        }
+
         public string Code
         {
-            get { return base.Parameters["code"]; }
+            get
+            {
+                return base.Parameters["code"];
+            }
             set
             {
                 if (string.IsNullOrEmpty(value))
@@ -43,16 +62,16 @@ namespace WindowsAzure.Acs.Oauth2.Protocol
             }
         }
 
-        public AccessTokenRequestWithAuthorizationCode(Uri baseUri)
+        public AccessTokenRequestWithRefreshToken(Uri baseUri)
             : base(baseUri)
         {
         }
 
         public override void Validate()
         {
-            if (string.IsNullOrEmpty(this.Code) || this.RedirectUri == null)
+            if (string.IsNullOrEmpty(this.RefreshToken))
             {
-                throw new OAuthMessageException(Resources.ID3710);
+                throw new OAuthMessageException(Resources.ID3752);
             }
             base.Validate();
         }

@@ -53,6 +53,9 @@
     <Compile Include="..\WindowsAzure.Acs.Oauth2\Protocol\AccessTokenRequestWithAuthorizationCode.cs">
       <Link>Protocol\AccessTokenRequestWithAuthorizationCode.cs</Link>
     </Compile>
+    <Compile Include="..\WindowsAzure.Acs.Oauth2\Protocol\AccessTokenRequestWithRefreshToken.cs">
+      <Link>Protocol\AccessTokenRequestWithRefreshToken.cs</Link>
+    </Compile>
     <Compile Include="..\WindowsAzure.Acs.Oauth2\Protocol\AccessTokenResponse.cs">
       <Link>Protocol\AccessTokenResponse.cs</Link>
     </Compile>

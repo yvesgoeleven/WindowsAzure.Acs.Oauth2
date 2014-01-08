@@ -199,10 +199,11 @@ namespace WindowsAzure.Acs.Oauth2.Client
 
             try
             {
-                var message = serializer.Read(httpWebRequest.GetResponse() as HttpWebResponse) as EndUserAuthorizationResponse;
+                var message = serializer.Read(httpWebRequest.GetResponse() as HttpWebResponse) as AccessTokenResponse;
                 if (message != null)
                 {
-                    AuthorizeWithACS(message.Code);
+                    CurrentAccessToken = message;
+                    LastAccessTokenRefresh = DateTime.UtcNow;
                 }
             }
             catch (WebException webex)

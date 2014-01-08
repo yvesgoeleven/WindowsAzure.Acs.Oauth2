@@ -167,4 +167,7 @@
   <data name="ID3751">
     <value xml:space="preserve">ID3751: The client_id could not be verified.</value>
   </data>
+  <data name="ID3752">
+    <value xml:space="preserve">ID3752: Access token request with refresh token should have a valid refresh_token and redirect_uri parameter specified.</value>
+  </data>
 </root>

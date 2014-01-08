@@ -2,9 +2,12 @@ using System;
 using System.Collections.Generic;
 using System.Configuration;
 using System.IdentityModel.Tokens;
+using System.IO;
 using System.Linq;
 using System.Threading;
 using System.Web;
+using System.Web.Mvc;
+using System.Web.Routing;
 using Microsoft.IdentityModel.Claims;
 using WindowsAzure.Acs.Oauth2.Protocol.Swt;
 
@@ -32,6 +35,7 @@ namespace WindowsAzure.Acs.Oauth2.ResourceServer
             _tokenSigningKey = tokenSigningKey;
 
             context.AuthenticateRequest += AuthenticateRequest;
+            context.EndRequest += OnEndRequest;
         }
 
         void AuthenticateRequest(object sender, EventArgs e)
@@ -50,9 +54,7 @@ namespace WindowsAzure.Acs.Oauth2.ResourceServer
                 }
             }
         }
-
-
-
+        
         public void AddAuthenticationStep(IAuthenticationStep step)
         {
             authenticationPipeline.Add(step);
@@ -216,5 +218,29 @@ namespace WindowsAzure.Acs.Oauth2.ResourceServer
 
             return tokenValid;
         }
+
+        private void OnEndRequest(object source, EventArgs args)
+        {
+            var context = (HttpApplication)source;
+            var response = context.Response;
+
+            if (context.Context.Items.Contains("SuppressRedirect"))
+            {
+                response.TrySkipIisCustomErrors = true;
+                response.ClearContent();
+                response.StatusCode = (int)context.Context.Items["SuppressRedirect"];
+                response.Write(context.Context.Items["SuppressRedirect.Result"]);
+                response.RedirectLocation = null;
+            }
+        }
+
+    }
+
+    public class OpenControllerFactory : DefaultControllerFactory
+    {
+       public new Type GetControllerType(RequestContext requestContext, string controllerName)
+       {
+          return base.GetControllerType(requestContext, controllerName);
+       }
     }
 }

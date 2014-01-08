@@ -1,9 +1,13 @@
-﻿using System.Configuration;
-using System.Linq;
+﻿using System;
+using System.Configuration;
+using System.IO;
+using System.Net;
+using System.Security.Authentication;
 using System.Web;
+using System.Web.Helpers;
 using System.Web.Mvc;
-using Microsoft.IdentityModel.Claims;
 using WindowsAzure.Acs.Oauth2.Protocol;
+using Newtonsoft.Json;
 
 namespace WindowsAzure.Acs.Oauth2
 {
@@ -12,13 +16,14 @@ namespace WindowsAzure.Acs.Oauth2
     /// </summary>
     public class TwoLeggedAuthorizationServer : AuthorizationServerBase
     {
-       
+        private Uri AccessTokenUri;
+
         /// <summary>
         /// Initializes a new instance of the <see cref="TwoLeggedAuthorizationServer"/> class.
         /// The parameters are read from the application configuration's appSettings keys 'WindowsAzure.OAuth.ServiceNamespace', 'WindowsAzure.OAuth.ServiceNamespaceManagementUserName', 'WindowsAzure.OAuth.ServiceNamespaceManagementUserKey' and 'WindowsAzure.OAuth.RelyingPartyName'.
         /// </summary>
         public TwoLeggedAuthorizationServer()
-            : this(ConfigurationManager.AppSettings["WindowsAzure.OAuth.RelyingPartyName"], new ApplicationRegistrationService())
+            : this(ConfigurationManager.AppSettings["WindowsAzure.OAuth.RelyingPartyName"], new Uri(string.Format("https://{0}.accesscontrol.windows.net/v2/OAuth2-13/", ConfigurationManager.AppSettings["WindowsAzure.OAuth.ServiceNamespace"])), new ApplicationRegistrationService())
         {
         }
 
@@ -28,7 +33,7 @@ namespace WindowsAzure.Acs.Oauth2
         /// </summary>
         /// <param name="applicationRegistrationService">The application registration service.</param>
         public TwoLeggedAuthorizationServer(IApplicationRegistrationService applicationRegistrationService)
-            : this(ConfigurationManager.AppSettings["WindowsAzure.OAuth.RelyingPartyName"], applicationRegistrationService)
+            : this(ConfigurationManager.AppSettings["WindowsAzure.OAuth.RelyingPartyName"], new Uri(string.Format("https://{0}.accesscontrol.windows.net/v2/OAuth2-13/", ConfigurationManager.AppSettings["WindowsAzure.OAuth.ServiceNamespace"])), applicationRegistrationService)
         {
         }
 
@@ -36,8 +41,9 @@ namespace WindowsAzure.Acs.Oauth2
         /// Initializes a new instance of the <see cref="TwoLeggedAuthorizationServer"/> class.
         /// </summary>
         /// <param name="relyingPartyName">The relying party name.</param>
-        public TwoLeggedAuthorizationServer(string relyingPartyName, IApplicationRegistrationService applicationRegistrationService)
+        public TwoLeggedAuthorizationServer(string relyingPartyName, Uri accessTokenUri, IApplicationRegistrationService applicationRegistrationService)
         {
+            AccessTokenUri = accessTokenUri;
             RelyingPartyName = relyingPartyName;
             ApplicationRegistrationService = applicationRegistrationService;
         }
@@ -72,22 +78,149 @@ namespace WindowsAzure.Acs.Oauth2
         {
             var message = StoreIncomingRequest(HttpContext);
 
-            if (message != null && message.Parameters[OAuthConstants.GrantType] == OAuthConstants.AccessGrantType.ClientCredentials)
+            if (message != null && (
+                message.Parameters[OAuthConstants.GrantType] == OAuthConstants.AccessGrantType.ClientCredentials
+                || message.Parameters[OAuthConstants.GrantType] == OAuthConstants.AccessGrantType.RefreshToken))
             {
-                string code = ApplicationRegistrationService.GetAuthorizationCode(message.Parameters[OAuthConstants.ClientId], GetDelegatedIdentity(), message.Parameters[OAuthConstants.Scope]);
-                if (code != null)
+                var clientId = message.Parameters[OAuthConstants.ClientId];
+                var secret = message.Parameters[OAuthConstants.ClientSecret];
+                var scope = message.Parameters[OAuthConstants.Scope];
+                var grantType = message.Parameters[OAuthConstants.GrantType];
+                
+                string token = null;
+
+                if (grantType == OAuthConstants.AccessGrantType.ClientCredentials)
                 {
-                    return Redirect(message.GetCodeResponseUri(code));
+                    try
+                    {
+                        token = ApplicationRegistrationService.GetAuthorizationCode(clientId, GetDelegatedIdentity(), scope);
+                    }
+                    catch (OAuthMessageException ex)
+                    {
+                        //this doesn't work mvc still replaces everything with 302
+                        //HttpContext.Response.StatusCode = (int)HttpStatusCode.Unauthorized;
+                        //HttpContext.Response.SuppressFormsAuthenticationRedirect = true;
+                        HttpContext.Items["SuppressRedirect"] = HttpStatusCode.Unauthorized;
+                        HttpContext.Items["SuppressRedirect.Result"] = JsonConvert.SerializeObject(new { message = ex.Message });
+                        return null;
+                    }
+                    catch (Exception ex)
+                    {
+                        HttpContext.Items["SuppressRedirect"] = HttpStatusCode.InternalServerError;
+                        HttpContext.Items["SuppressRedirect.Result"] = JsonConvert.SerializeObject(new { message = ex.Message });
+                        return null;
+                    }
+                    if (token == null)
+                    {
+                        HttpContext.Items["SuppressRedirect"] = HttpStatusCode.Unauthorized;
+                        HttpContext.Items["SuppressRedirect.Result"] = JsonConvert.SerializeObject(new { message = "Error generating authorization code, ensure that a valid client_id, client_code and scope has been specified." });
+                        return null;
+                    }
                 }
-                else
+
+                 if (grantType == OAuthConstants.AccessGrantType.RefreshToken)
+                    token = message.Parameters[OAuthConstants.RefreshToken];
+                
+                try
                 {
-                    return Redirect(message.GetErrorResponseUri(OAuthConstants.ErrorCode.AccessDenied, "Error generating Authorization code. Please check if the Service Identity and the Replying Party are correct."));
+                    var response = AuthorizeWithACS(grantType, token, clientId, secret, scope);
+
+                    return Json(new
+                    {
+                        token_type = response.TokenType,
+                        access_token = response.AccessToken,
+                        scope = response.Scope,
+                        expires_in = response.ExpiresIn,
+                        refresh_token = response.RefreshToken
+                    });
                 }
+                catch (AuthenticationException ex)
+                {
+                    HttpContext.Items["SuppressRedirect"] = HttpStatusCode.Forbidden;
+                    HttpContext.Items["SuppressRedirect.Result"] = JsonConvert.SerializeObject(new { message = ex.Message });
+                    return null;
+                }
+                catch (Exception ex)
+                {
+                    HttpContext.Items["SuppressRedirect"] = HttpStatusCode.InternalServerError;
+                    HttpContext.Items["SuppressRedirect.Result"] = JsonConvert.SerializeObject(new { message = ex.Message });
+                    return null;
+                }
+                
             }
             else
             {
-                return Redirect(message.GetErrorResponseUri(OAuthConstants.ErrorCode.UnsupportedGrantType, "The provided grant type is not supported by this endpoint"));
+                HttpContext.Items["SuppressRedirect"] = HttpStatusCode.Unauthorized;
+                HttpContext.Items["SuppressRedirect.Result"] = JsonConvert.SerializeObject(new { message = "The provided grant type is not supported by this endpoint" });
+                return null;
             }
+        }
+
+        private AccessTokenResponse AuthorizeWithACS(string grantType, string code, string clientId, string secret, string scope)
+        {
+            var authorizeRequest = BuildAccessTokenRequest(grantType, code, clientId, secret, scope);
+
+            var serializer = new OAuthMessageSerializer();
+            var encodedQueryFormat = serializer.GetFormEncodedQueryFormat(authorizeRequest);
+
+            var httpWebRequest = WebRequest.Create(authorizeRequest.BaseUri);
+            httpWebRequest.Method = "POST";
+            httpWebRequest.ContentType = "application/x-www-form-urlencoded";
+            var streamWriter = new StreamWriter(httpWebRequest.GetRequestStream());
+            streamWriter.Write(encodedQueryFormat);
+            streamWriter.Close();
+
+            try
+            {
+                return serializer.Read((HttpWebResponse)httpWebRequest.GetResponse()) as AccessTokenResponse;
+            }
+            catch (WebException webex)
+            {
+                var message = serializer.Read((HttpWebResponse)webex.Response);
+
+                var endUserAuthorizationFailedResponse = message as EndUserAuthorizationFailedResponse;
+                if (endUserAuthorizationFailedResponse != null)
+                {
+                    throw new AuthenticationException(endUserAuthorizationFailedResponse.ErrorDescription);
+                }
+
+                var userAuthorizationFailedResponse = message as ResourceAccessFailureResponse;
+                if (userAuthorizationFailedResponse != null)
+                {
+                    throw new AuthenticationException(userAuthorizationFailedResponse.ErrorDescription);
+                }
+
+                throw;
+            }
+        }
+
+        private AccessTokenRequest BuildAccessTokenRequest(string grantType, string code, string clientId, string secret, string scope)
+        {
+            if (grantType == OAuthConstants.AccessGrantType.ClientCredentials)
+            {
+                return new AccessTokenRequestWithAuthorizationCode(AccessTokenUri)
+                {
+                    ClientId = clientId,
+                    ClientSecret = secret,
+                    Scope = scope,
+                    GrantType = OAuthConstants.AccessGrantType.AuthorizationCode,
+                    Code = code,
+                    RedirectUri = new Uri("http://" + clientId)
+                };
+            }
+            if (grantType == OAuthConstants.AccessGrantType.RefreshToken)
+            {
+                return new AccessTokenRequestWithRefreshToken(AccessTokenUri)
+                {
+                    ClientId = clientId,
+                    ClientSecret = secret,
+                    Scope = scope,
+                    GrantType = OAuthConstants.AccessGrantType.RefreshToken,
+                    RefreshToken = code,
+                    RedirectUri = new Uri("http://" + clientId)
+                };
+            }
+            return null;
         }
     }
 }

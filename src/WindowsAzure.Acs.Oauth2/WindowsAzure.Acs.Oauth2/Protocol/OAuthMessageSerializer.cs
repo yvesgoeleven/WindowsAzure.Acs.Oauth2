@@ -1,8 +1,10 @@
 using System;
 using System.Collections.Specialized;
 using System.IO;
+using System.Linq;
 using System.Net;
 using System.Web;
+using System.Web.UI.WebControls;
 using Newtonsoft.Json;
 
 namespace WindowsAzure.Acs.Oauth2.Protocol
@@ -118,7 +120,7 @@ namespace WindowsAzure.Acs.Oauth2.Protocol
                             case JsonToken.Integer:
                             case JsonToken.Null:
                             case JsonToken.String:
-                                parameters[key] = jsonReader.Value.ToString();
+                                parameters[key] = jsonReader.Value != null ? jsonReader.Value.ToString() : null;
                                 break;
                         }
                     }
@@ -203,6 +205,10 @@ namespace WindowsAzure.Acs.Oauth2.Protocol
             if (!string.IsNullOrEmpty(parameters["grant_type"]) && parameters["grant_type"] == "authorization_code")
             {
                 request = new AccessTokenRequestWithAuthorizationCode(baseUri);
+            }
+            if (!string.IsNullOrEmpty(parameters["refresh_token"]))
+            {
+                request = new AccessTokenRequestWithRefreshToken(baseUri);
             }
             if (!string.IsNullOrEmpty(parameters["grant_type"]) && parameters["grant_type"] == OAuthConstants.AccessGrantType.ClientCredentials)
             {
