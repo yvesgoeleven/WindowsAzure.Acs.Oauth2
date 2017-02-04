@@ -254,7 +254,7 @@ namespace WindowsAzure.Acs.Oauth2.Client
                 Authorize(CurrentAccessToken.RefreshToken);
             }
 
-            var token = "Bearer " + Convert.ToBase64String(Encoding.UTF8.GetBytes(CurrentAccessToken.AccessToken));
+            var token = "Bearer " + CurrentAccessToken.AccessToken;
             return token;
         }
 

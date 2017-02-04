@@ -3,6 +3,7 @@ using System.Configuration;
 using System.IO;
 using System.Net;
 using System.Security.Authentication;
+using System.Text;
 using System.Web;
 using System.Web.Helpers;
 using System.Web.Mvc;
@@ -128,7 +129,7 @@ namespace WindowsAzure.Acs.Oauth2
                     return Json(new
                     {
                         token_type = response.TokenType,
-                        access_token = response.AccessToken,
+                        access_token = Convert.ToBase64String(Encoding.UTF8.GetBytes(response.AccessToken)),
                         scope = response.Scope,
                         expires_in = response.ExpiresIn,
                         refresh_token = response.RefreshToken
